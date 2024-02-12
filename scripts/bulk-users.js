@@ -17,6 +17,43 @@ var bulkUsers= (function() {
         domTitle.appendChild(document.createTextNode("Bulk User Tool"));
         domContainerRoot.appendChild(domTitle);
 
+        domBreadcrumb = document.createElement("DIV");
+        domContainerRoot.appendChild(domBreadcrumb);
+
+        function setBreadcrumb(crumbs) {
+            // Expects a list of objects with properties {text, callback}
+            // For now, we'll just destroy and recreate the list
+
+            domBreadcrumb.innerHTML = ''; // Eh, it works.
+            var hasPrior = false;
+            
+            crumbs.forEach(function(crumb) {
+                // Need to recreate this in CSS/NAV/LI ideally
+                
+                if (hasPrior) {
+                    domBreadcrumb.appendChild(document.createTextNode(" > "));                    
+                }
+                hasPrior = true;
+                if (crumb.callback) {
+                    let crumbButton = document.createElement("A");
+                    crumbButton.href = '#';
+                    crumbButton.appendChild(document.createTextNode(crumb.text));
+                    crumbButton.addEventListener("click", function(ev) {
+                        ev.preventDefault();
+                        crumb.callback();                        
+                    })
+                    domBreadcrumb.appendChild(crumbButton);
+                } else {
+                    let crumbButton = document.createElement("SPAN");
+                    crumbButton.appendChild(document.createTextNode(crumb.text));
+                    domBreadcrumb.appendChild(crumbButton);
+                }
+                
+                
+            });
+
+            
+        }
         
         
         domContainerInner = document.createElement("DIV");
@@ -34,7 +71,7 @@ var bulkUsers= (function() {
         return domContainerRoot;
     }
 
-       return { init: init, attach: attach, getDom: getDom } 
+       return { init: init, attach: attach, getDom: getDom, setBreadcrumb: setBreadcrumb } 
     })();
 
     
@@ -61,7 +98,7 @@ var bulkUsers= (function() {
 
             // Wire up the selection button
             domPublisherSelect.addEventListener('click', function() {
-                successCallback(domPublishers.value);                
+                successCallback({'id':domPublishers.value, 'text':domPublishers[domPublishers.selectedIndex].text});                
             })
 
             // Populate the publishers list
@@ -146,7 +183,7 @@ var bulkUsers= (function() {
         function show() {
             domCard.style.display = 'block';
             // Get some sample data for now
-            fetch("//data.london.gov.uk/api/org/"+state.publisher, {'headers': {'Identity': jwt}}).then(function(resp) {
+            fetch("//data.london.gov.uk/api/org/"+state.publisher.id, {'headers': {'Identity': jwt}}).then(function(resp) {
                 return resp.json();
             }).then(function(json) {
                 let text = '';
@@ -321,27 +358,69 @@ var bulkUsers= (function() {
         cardActions.init();
         cardAddUsers.init();
 
+        function hideAllCards() {
+            // Rubbish implementation here
+            cardPublisher.hide();
+            cardUsers.hide();
+            cardActions.hide();
+            cardAddUsers.hide();
+
+            
+        }
+        
+        function setBreadHome(crumbs) {
+            // Add Home to the FRONT of the breadcrumb and go set it
+            crumbs.unshift({'text': 'Home', 'callback': function() {
+                hideAllCards();
+                setBreadHome([]);
+                cardPublisher.show();
+            }});
+            domContainer.setBreadcrumb(crumbs);
+        }
+
+        function setBreadPublisher(crumbs) {
+            // Add the publisher to the breadcrumbs
+            crumbs.unshift({'text': state.publisher.text, 'callback': function() {
+                hideAllCards();
+                setBreadPublisher([]);
+                cardActions.show();
+            }})
+            setBreadHome(crumbs);
+        }
+
+        function setBreadAction(action) {
+            crumbs = []
+            crumbs.push({'text': action});
+            setBreadPublisher(crumbs);
+        }
+
         cardActions.setCallback(function(selection) {
             
             if (selection == 'listusers') {
+                hideAllCards();
+                setBreadAction('List Users');
                 cardUsers.show();
             } else if(selection == 'addusers') {
+                hideAllCards();
+                setBreadAction('Add Users');
                 cardAddUsers.show();
             } else {
                 alert('Invalid selection');
                 return;
             }
-            cardActions.hide();
+            
         });
         
         cardPublisher.setCallback(function(selection) { 
             state.publisher = selection;
-            cardPublisher.hide();
+            hideAllCards();
+            setBreadPublisher([]);
             cardActions.show();
         });
 
         cardUsers.setCallback(function(selection) { 
-            cardUsers.hide();
+            hideAllCards();
+            setBreadAction('Actions');
             cardActions.show();
         });
 
@@ -350,6 +429,7 @@ var bulkUsers= (function() {
         });
 
         cardPublisher.show();
+        domContainer.setBreadcrumb([{'text': 'Home'}]);
     }
 
 
