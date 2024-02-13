@@ -177,17 +177,16 @@ var bulkUsers= (function() {
             // Wire up the selection button
             domPublisherSelect.addEventListener('click', function() {
                 // Once we've selected the publisher, go get the ID
-                fetch("//data.london.gov.uk/api/org/"+state.publisher.slug,
-                      {headers:
+                fetch("//data.london.gov.uk/api/org/" + domPublishers.value,
+                      {
+                          headers:
                           {
                               'Identity': jwt
-                          }}).then(function(resp) {
-                return resp.json();
-            }).then(function(json) {
-                state.publisher.id = json.id;
-                
-            }).then({
-                successCallback({'id': null, 'slug':domPublishers.value, 'text':domPublishers[domPublishers.selectedIndex].text});                
+                          }
+                      })
+                    .then(resp => resp.json())
+                    .then(function(json) {
+                        successCallback({'id': json.id, 'slug':domPublishers.value, 'text':domPublishers[domPublishers.selectedIndex].text});                
                 });
             })
 
