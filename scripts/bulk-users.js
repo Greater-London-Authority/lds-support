@@ -86,16 +86,15 @@ var bulkUsers= (function() {
 
     var domContainer = (function() {
         var domContainerRoot = document.createElement("DIV");
-        domContainerRoot.style.backgroundColor='#eeeeee';
-        domContainerRoot.style.fontSize='1.2em';
-        domContainerRoot.style.minWidth='700px';
-        domContainerRoot.style.padding='10px';
+        domContainerRoot.classList.add("custom_lds_tool");
+
 
         domTitle = document.createElement("H2");
         domTitle.appendChild(document.createTextNode("Bulk User Tool"));
         domContainerRoot.appendChild(domTitle);
 
         domBreadcrumb = document.createElement("DIV");
+        domBreadcrumb.classList.add('user_breadcrumb');
         domContainerRoot.appendChild(domBreadcrumb);
 
         function setBreadcrumb(crumbs) {
@@ -239,8 +238,6 @@ var bulkUsers= (function() {
         domUsersInput.style.display = 'block';
         domUsersInput.style.width='100%';
         domUsersInput.style.height='300px';
-        var domCardSelect = document.createElement("button");
-        domCardSelect.appendChild(document.createTextNode("Done"));
         var successCallback = function() {}
         
         function init() {
@@ -248,28 +245,17 @@ var bulkUsers= (function() {
             domCard = document.createElement('div');
             domCard.appendChild(domDescription);
             domCard.appendChild(domUsersInput);
-            domCard.appendChild(domCardSelect);
             domCard.style.display = 'none';
 
             // Attach myself to domRoot
             domContainer.attach(domCard);
-
-            // Wire up the selection button
-            domCardSelect.addEventListener('click', function() {
-                successCallback(domUsersInput.value);                
-            })
-
-            
-            
         }
         function setCallback(_callback) {
             successCallback = _callback;   
         }
-        function show() {
-            domCard.style.display = 'block';
-        }
 
         function show() {
+            domUsersInput.value = '';
             domCard.style.display = 'block';
             // Get some sample data for now
             fetch("//data.london.gov.uk/api/org/"+state.publisher.slug, {'headers': {'Identity': jwt}}).then(function(resp) {
@@ -299,57 +285,46 @@ var bulkUsers= (function() {
         var domCard = null;
         var domDescription = document.createElement("p");
         domDescription.appendChild(document.createTextNode("Processing users..."));
-        var domUsersInput = document.createElement("textarea");
-        domUsersInput.style.display = 'block';
-        domUsersInput.style.width='100%';
-        domUsersInput.style.height='300px';
-        var domCardSelect = document.createElement("button");
-        domCardSelect.appendChild(document.createTextNode("Process List"));
+
+        // This is where we'll contain the users...
+        var domUserList = document.createElement("DIV");
+
+        function createUserRow(email) {
+            var _dom = document.createElement("DIV");
+            _dom.classList.add("user_row");
+            _dom.classList.add("user_pending");
+            let _domUserName = document.createElement("DIV");
+            _domUserName.appendChild(document.createTextNode(email));
+            _domUserName.classList.add("user_name");
+            let _domUserStatus = document.createElement("DIV");
+            _domUserStatus.classList.add("user_status");
+            let _textStatus = document.createTextNode("Pending");
+            _domUserStatus.appendChild(_textStatus);
+            _dom.appendChild(_domUserName);
+            _dom.appendChild(_domUserStatus);
+            var updater = function(status, state) {
+                _textStatus.nodeValue = status;
+                _dom.classList.remove("user_pending");
+                _dom.classList.remove("user_processing");
+                _dom.classList.add("user_" + state);
+            }
+            domUserList.appendChild(_dom);
+            return updater;
+        }
+        
+
         var successCallback = function() {}
         
         function init() {
             // Attach ourselves as a child of domRoot
             domCard = document.createElement('div');
             domCard.appendChild(domDescription);
-            domCard.appendChild(domUsersInput);
-            domCard.appendChild(domCardSelect);
+            domCard.appendChild(domUserList);
             domCard.style.display = 'none';
 
             // Attach myself to domRoot
             domContainer.attach(domCard);
-
-            // Wire up the selection button
-            domCardSelect.addEventListener('click', function() {
-                successCallback(domUsersInput.value);                
-            })
-
-            
-            
         }
-
-        // Notes:
-        // GET to https://data.london.gov.uk/api/users/search?q=sven.latham%2Btest4%40london.gov.uk&domain=&offset=0&org=2bfc2654-75e6-43b7-af60-335d9f702c3b
-        // gives us a list, containing the member if found and the property member [true/false]
-
-        // Addition of existing user is a PATCH to
-        // https://data.london.gov.uk/api/org/2bfc2654-75e6-43b7-af60-335d9f702c3b
-        // with payload (e.g.)
-        // [{"op":"add","path":"/members/4535af5b-e4d6-400a-a336-dfb0af77f2ac","value":{"admin":false}}]
-
-        // New user flow is via WordPress:
-        // https://data.london.gov.uk/wp-admin/user-new.php
-        // Note WP authentication cookies needed
-        // Payload (POST) is 
-        /*
-        action: createuser
-        _wpnonce_create-user: xxxxxxxxx
-        _wp_http_referer: /wp-admin/user-new.php
-        user_login: {username}
-        email: {email}
-        role: user
-        noconfirmation: 1
-        createuser: Add New User
-        */
 
         function setCallback(_callback) {
             successCallback = _callback;   
@@ -357,22 +332,85 @@ var bulkUsers= (function() {
 
         function show(usertext) {
             domCard.style.display = 'block';
-            domUsersInput.value = '';
             var users = usertext.split("\n");
+            var useractions = [];
+            
             users.forEach(function(user) {
                 if (!user.trim()) { return; }
-                datastoreInterop.doesAccountExist(user).then((hasUser) => {
-                    if (hasUser) {
-                    alert(user+" exists");
+                let useraction = {
+                    user: user.trim(),
+                    action: 'check_state',
+                    dom: createUserRow(user.trim()),
+                    setState: function (state) {
+                        // link_to_org, create_user, linked
+                        // pending, processing, done, failed
+                        if (state == 'link_to_org') {
+                            this.action = 'link_to_org';
+                            this.dom('Linking User to Group','processing');
+                            return;
+                        }
+                        if (state == 'create_user') {
+                            this.action = 'create_user';
+                            this.dom('Creating User in WordPress','processing');
+                            return;
+                        }
+                        if (state == 'done') {
+                            this.action = '';
+                            this.dom('User added to Group ✅','done');
+                            return;
+                        }
+                        if (state == 'failed') {
+                            this.action = '';
+                            this.dom('Could not link User ❌','failed');
+                            return;
+                        }
+                        
+                        alert("state is not recognised " + state);
+                    }
+                };
+                useractions.push(useraction);
+            });
+
+            // Now process each item. I'm an async novice, so probably doing this wrong...
+
+            function checkActionsList() {
+                let nextAction = useractions.find((item) => item['action'] != '' );
+                if (nextAction) {
+                    console.log(nextAction);
+                    if (nextAction.action == 'check_state') {
+                        datastoreInterop.doesAccountExist(nextAction.user).then((hasUser) => {
+                         if (hasUser) {
+                            nextAction.setState('link_to_org');
+                         } else {
+                             nextAction.setState('create_user');
+                         }
+                        })
+                        .then(() => {
+                        console.log(useractions);
+                        checkActionsList();
+                        });
+                    } else if (nextAction.action == 'create_user') {
+                        console.log("Create user "+nextAction.user);
+                        nextAction.setState('link_to_org');
+                        checkActionsList();
+                    } else if (nextAction.action == 'link_to_org') {
+                        console.log("Linking user "+nextAction.user+" to org");
+                        nextAction.setState('failed');
+                        checkActionsList();
+                    }
                 } else {
-                    alert(user+" does not exist");
-                    datastoreInterop.createUser(user);
+                    // All done
                 }
-                });
+            }
+
+            checkActionsList();
+            //datastoreInterop.createUser(user);
+            //   datastoreInterop.doesAccountExist(user).then((hasUser) => {
+                   
+              // });
                 
 
                 
-            })
         }
 
         function hide() {
@@ -535,6 +573,53 @@ var bulkUsers= (function() {
         cardAddUsers.init();
         cardProcessUsers.init();
         datastoreInterop.init();
+
+        const styles = `
+            .user_row { position: relative; background-color: #eee; padding: 5px; margin: 5px 0; }
+            .user_status { position: absolute; right: 5px; text-align: right; width: 40%; top: 5px; }
+            .user_name {  }
+            
+            .user_pending { background-color: #ddd; }
+            .user_processing { background-color: #ccf; }
+            .user_done { background-color: #bfb; }
+            .user_failed { background-color: #fbb; }
+
+            button {
+                display: block;
+                padding: 0.6em 1.2em;
+                border-radius: 3px;
+                border-color: #999;
+                box-shadow: 0 2px 2px rgba(0,0,0,0.3);    
+                background-color: #cccccc;
+                margin: 0.3em 0;
+            }
+
+            select {
+                padding: 0.6em 1.2em;
+                font-size: 80%;
+                width: 100%; 
+                margin: 0.3em 0;
+            }
+
+            textarea { padding: 0.3em; }
+            
+
+
+            .custom_lds_tool {
+                background-color: #eeeeee;
+                font-size: 1.2em;
+                min-width: 700px;
+                padding: 2em; border: solid 1px #ccc; 
+                font-family: Calibri, 'Open Sans',sans-serif;
+            }
+
+            .user_breadcrumb { font-size: 0.8em; color: #999; margin: 0 0 2em 0; }
+        
+        `
+
+        var stylesheet = document.createElement("STYLE");
+        stylesheet.innerHTML = styles;
+        document.head.appendChild(stylesheet);
 
         function hideAllCards() {
             // Rubbish implementation here
