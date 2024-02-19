@@ -1,10 +1,36 @@
 /* Adds a simple UI for adding users in bulk. Only works if you have the right permissions already for the project. */
 
+// Some generic classes so we can wrap fetch and raise Exceptions
+class DatastoreResponseError extends Error {
+    constructor(msg, res) {
+        this.response = res;
+    }
+}
+
+class InvalidUserError extends Error {
+    constructor(msg, res) {
+        this.response = res;
+    }
+}
+
+async function datastoreFetch(...options) {
+    const res = await fetch(...options);
+    if (!res.ok) {
+        throw new DatastoreResponseError('Request failed', res);
+    }
+    return res;
+}
+
+
 var bulkUsers= (function() {
     // When you initialise me, pass in a DIV so I know where to render
     var domRoot = null;
     
     var jwt = null; // We'll use this for calls to the backend
+
+   
+
+    
 
     var datastoreInterop = (function() {
 
@@ -15,7 +41,7 @@ var bulkUsers= (function() {
 
             const re = /_wpnonce_create-user" value="([^"]+)"/;
             
-            await fetch("/wp-admin/user-new.php", {
+            await datastoreFetch("/wp-admin/user-new.php", {
                 credentials: 'same-origin'
             })
             .then(resp => resp.text())
@@ -31,11 +57,11 @@ var bulkUsers= (function() {
 
         }
 
-        async function doesAccountExist(email) {
+        async function getAccountDetails(email) {
             // Given an email address, returns a true/false if it exists
             // Throws an exception if our user doesn't have permission
 
-            var outcome = await fetch("//data.london.gov.uk/api/users/search?" + new URLSearchParams({
+            var outcome = await datastoreFetch("//data.london.gov.uk/api/users/search?" + new URLSearchParams({
                   'q': email, 'domain': '', 'offset': 0, 'org': state.publisher.id}),
                          {
                              headers: {
@@ -45,7 +71,7 @@ var bulkUsers= (function() {
                          }
                                      )
                 .then((resp) => { return resp.json(); })
-                .then((json) => { return json.length > 0; });
+                .then((json) => { if (json.length == 1) { return json[0]; } else { return null; } });
             return outcome;
         }
 
@@ -60,27 +86,41 @@ var bulkUsers= (function() {
             data.append('noconfirmation','1');
             
             // WP uses nonces which are a pain to generate externally, so we'll use forms...
-            await fetch("/wp-admin/user-new.php", {
+            await datastoreFetch("/wp-admin/user-new.php", {
                 credentials: 'same-origin',
                 method: 'POST',
                 body: data
             })
-            .then(resp => resp.text())
-            .then(html => console.log("User created for "+email));
+            .then(resp => resp.text());
         }
 
+        async function linkUserToOrg(user_id, org_id) {
 
+            // Addition of existing user is a PATCH to
+            // https://data.london.gov.uk/api/org/2bfc2654-75e6-43b7-af60-335d9f702c3b
+            // with payload (e.g.)
+            // [{"op":"add","path":"/members/4535af5b-e4d6-400a-a336-dfb0af77f2ac","value":{"admin":false}}]
 
+            let data = [{
+                'op': 'add',
+                'path': '/members/' + user_id,
+                'value': {
+                    'admin': false
+                }
+            }];
 
+            await datastoreFetch("//data.london.gov.uk/api/org/" + org_id, {
+                method: 'PATCH',
+                headers: {
+                    'Identity': jwt,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+        }
 
-
-        return { init: init, doesAccountExist: doesAccountExist, createUser: createUser }
+        return { init: init, getAccountDetails: getAccountDetails, createUser: createUser, linkUserToOrg: linkUserToOrg }
     })();
-
-
-
-
-
 
     
 
@@ -91,7 +131,7 @@ var bulkUsers= (function() {
 
         domTitle = document.createElement("H2");
         domTitle.appendChild(document.createTextNode("Bulk User Tool"));
-        domContainerRoot.appendChild(domTitle);
+        //domContainerRoot.appendChild(domTitle);
 
         domBreadcrumb = document.createElement("DIV");
         domBreadcrumb.classList.add('user_breadcrumb');
@@ -135,6 +175,14 @@ var bulkUsers= (function() {
         
         domContainerInner = document.createElement("DIV");
         domContainerRoot.appendChild(domContainerInner);
+        let domDisclaimer = document.createElement("DIV");
+        domDisclaimer.classList.add("user_disclaimer");
+        domDisclaimer.appendChild(document.createTextNode("For questions about this tool please contact "));
+        let domA = document.createElement("A");
+        domA.href = "mailto:sven.latham@london.gov.uk";
+        domA.appendChild(document.createTextNode("sven.latham@london.gov.uk"));
+        domDisclaimer.appendChild(domA);
+        domContainerRoot.appendChild(domDisclaimer);
         
         function init() {
 
@@ -144,9 +192,9 @@ var bulkUsers= (function() {
             domContainerInner.appendChild(dom);
         }
 
-    function getDom() {
-        return domContainerRoot;
-    }
+        function getDom() {
+            return domContainerRoot;
+        }
 
        return { init: init, attach: attach, getDom: getDom, setBreadcrumb: setBreadcrumb } 
     })();
@@ -224,8 +272,6 @@ var bulkUsers= (function() {
             domCard.style.display = 'none';
         }
 
-
-
         return { init: init, show: show, hide: hide, setCallback: setCallback }
     })();
 
@@ -233,7 +279,7 @@ var bulkUsers= (function() {
     var cardUsers = (function() {
         var domCard = null;
         var domDescription = document.createElement("p");
-        domDescription.appendChild(document.createTextNode("Here is a list of users, one per line"));
+        domDescription.appendChild(document.createTextNode("These are your users for this publisher."));
         var domUsersInput = document.createElement("textarea");
         domUsersInput.style.display = 'block';
         domUsersInput.style.width='100%';
@@ -331,6 +377,7 @@ var bulkUsers= (function() {
         }
 
         function show(usertext) {
+            domUserList.innerHTML = '';
             domCard.style.display = 'block';
             var users = usertext.split("\n");
             var useractions = [];
@@ -341,7 +388,7 @@ var bulkUsers= (function() {
                     user: user.trim(),
                     action: 'check_state',
                     dom: createUserRow(user.trim()),
-                    setState: function (state) {
+                    setState: function (state, msg) {
                         // link_to_org, create_user, linked
                         // pending, processing, done, failed
                         if (state == 'link_to_org') {
@@ -356,12 +403,13 @@ var bulkUsers= (function() {
                         }
                         if (state == 'done') {
                             this.action = '';
-                            this.dom('User added to Group ✅','done');
+                            this.dom((msg ? msg : 'User added to Group') + ' ✔','done');
                             return;
                         }
                         if (state == 'failed') {
                             this.action = '';
-                            this.dom('Could not link User ❌','failed');
+                            
+                            this.dom((msg ? msg : 'Could not link User') + ' ❌','failed');
                             return;
                         }
                         
@@ -378,8 +426,8 @@ var bulkUsers= (function() {
                 if (nextAction) {
                     console.log(nextAction);
                     if (nextAction.action == 'check_state') {
-                        datastoreInterop.doesAccountExist(nextAction.user).then((hasUser) => {
-                         if (hasUser) {
+                        datastoreInterop.getAccountDetails(nextAction.user).then((user) => {
+                         if (user) {
                             nextAction.setState('link_to_org');
                          } else {
                              nextAction.setState('create_user');
@@ -391,12 +439,35 @@ var bulkUsers= (function() {
                         });
                     } else if (nextAction.action == 'create_user') {
                         console.log("Create user "+nextAction.user);
-                        nextAction.setState('link_to_org');
-                        checkActionsList();
+                        
+                        datastoreInterop.createUser(nextAction.user).then(() => {
+                            console.log("User has been created - "+nextAction.user);
+                            nextAction.setState('link_to_org');
+                        }).then(() => {
+                            checkActionsList();
+                        })
                     } else if (nextAction.action == 'link_to_org') {
                         console.log("Linking user "+nextAction.user+" to org");
-                        nextAction.setState('failed');
-                        checkActionsList();
+                        datastoreInterop.getAccountDetails(nextAction.user).then((user) => {
+                            if (!user) {
+                                // User should have been provided here, so this is a breaking failure
+                                
+                            }
+                            return user.id;
+                        })
+                        .then((user_id) => datastoreInterop.linkUserToOrg(user_id, state.publisher.id))
+                        .then(() =>
+                        {
+                            console.log("User "+ nextAction.user + " linked to org " + state.publisher.id);
+                            nextAction.setState('done');
+                        }).then(() =>
+                        {
+                            checkActionsList();
+                        }).catch(err => {
+                            console.log(err);
+                            nextAction.setState("failed", "User creation failed");
+                            checkActionsList();
+                        })
                     }
                 } else {
                     // All done
@@ -404,13 +475,6 @@ var bulkUsers= (function() {
             }
 
             checkActionsList();
-            //datastoreInterop.createUser(user);
-            //   datastoreInterop.doesAccountExist(user).then((hasUser) => {
-                   
-              // });
-                
-
-                
         }
 
         function hide() {
@@ -426,7 +490,7 @@ var bulkUsers= (function() {
     var cardAddUsers = (function() {
         var domCard = null;
         var domDescription = document.createElement("p");
-        domDescription.appendChild(document.createTextNode("Paste a list of emails, one per line."));
+        domDescription.appendChild(document.createTextNode("Paste a list of emails, one per line. If the user doesn't already exist it will be created with a random username. Note the user will NOT receive an invitation email."));
         var domUsersInput = document.createElement("textarea");
         domUsersInput.style.display = 'block';
         domUsersInput.style.width='100%';
@@ -459,10 +523,6 @@ var bulkUsers= (function() {
         // GET to https://data.london.gov.uk/api/users/search?q=sven.latham%2Btest4%40london.gov.uk&domain=&offset=0&org=2bfc2654-75e6-43b7-af60-335d9f702c3b
         // gives us a list, containing the member if found and the property member [true/false]
 
-        // Addition of existing user is a PATCH to
-        // https://data.london.gov.uk/api/org/2bfc2654-75e6-43b7-af60-335d9f702c3b
-        // with payload (e.g.)
-        // [{"op":"add","path":"/members/4535af5b-e4d6-400a-a336-dfb0af77f2ac","value":{"admin":false}}]
 
         // New user flow is via WordPress:
         // https://data.london.gov.uk/wp-admin/user-new.php
@@ -580,7 +640,7 @@ var bulkUsers= (function() {
             .user_name {  }
             
             .user_pending { background-color: #ddd; }
-            .user_processing { background-color: #ccf; }
+            .user_processing { background-color: #ffc; }
             .user_done { background-color: #bfb; }
             .user_failed { background-color: #fbb; }
 
@@ -614,6 +674,8 @@ var bulkUsers= (function() {
             }
 
             .user_breadcrumb { font-size: 0.8em; color: #999; margin: 0 0 2em 0; }
+
+            .user_disclaimer { font-size: 0.8em; color: #999; margin: 2em 0; }
         
         `
 
