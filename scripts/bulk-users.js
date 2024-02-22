@@ -57,6 +57,34 @@ var bulkUsers= (function() {
 
         }
 
+        async function getOrgs() {
+            var outcome = await datastoreFetch("//data.london.gov.uk/api/orgs",
+                         {
+                             headers: {
+                                 'Identity': jwt
+                            },
+                             credentials: 'same-origin'
+                         }
+                                     )
+                .then((resp) => { return resp.json(); })
+            return outcome;            
+        }
+
+        async function getOrgsLegacy() {
+            // Kept here for historical value, parsing pages
+            // Populate the publishers list
+            fetch("//data.london.gov.uk/publisher/").then(function(resp) {
+                return resp.text();
+            }).then(function(html) {
+                var domp = new DOMParser();
+                let doc = domp.parseFromString(html, "text/html");
+                let cards = doc.querySelectorAll('.el-card__body') ;
+                
+            });
+
+            
+        }
+
         async function getAccountDetails(email) {
             // Given an email address, returns a true/false if it exists
             // Throws an exception if our user doesn't have permission
@@ -119,7 +147,13 @@ var bulkUsers= (function() {
             });
         }
 
-        return { init: init, getAccountDetails: getAccountDetails, createUser: createUser, linkUserToOrg: linkUserToOrg }
+        return {
+            init: init,
+            getAccountDetails: getAccountDetails,
+            createUser: createUser,
+            getOrgs: getOrgs,
+            linkUserToOrg: linkUserToOrg
+        }
     })();
 
     
@@ -233,28 +267,30 @@ var bulkUsers= (function() {
                       })
                     .then(resp => resp.json())
                     .then(function(json) {
-                        successCallback({'id': json.id, 'slug':domPublishers.value, 'text':domPublishers[domPublishers.selectedIndex].text});                
+                        successCallback(json);                
                 });
             })
 
-            // Populate the publishers list
-            fetch("//data.london.gov.uk/publisher/").then(function(resp) {
-                return resp.text();
-            }).then(function(html) {
-                var domp = new DOMParser();
-                let doc = domp.parseFromString(html, "text/html");
-                let cards = doc.querySelectorAll('.el-card__body') ;
-                cards.forEach((card) => {
-                    let slugA = card.querySelector('a');
-                    let slug = slugA.href.replace('https://data.london.gov.uk/publisher/','');
+            datastoreInterop.getOrgs().then((orgs) => {
+                // Recreate as a list first:
+                var orglist = [];
+                for (const k in orgs) {
+                    let org = orgs[k];
+                    org['id'] = k;
+                    orglist.push(org);
+                }
+                // Now sort
+                orglist = orglist.sort((a,b ) => { 
+                    return a.title.trim().toLowerCase() > b.title.trim().toLowerCase() ? 1 : -1;
+                });
+                orglist.forEach((org) => {
                     let opt = document.createElement('option');
-                    let publisherTitle = card.querySelector('h4');
-                    opt.value = slug;
-                    opt.text = publisherTitle.firstChild.textContent;
+                    let publisherTitle = org.title;
+                    opt.value = org.slug;
+                    opt.text = org.title;
                     domPublishers.add(opt);
-                })
-            });
-            
+                });                
+            })            
         }
 
         function setCallback(_callback) {
@@ -588,6 +624,11 @@ var bulkUsers= (function() {
             successCallback = _callback;   
         }
         function show() {
+            // Control the buttons on this page based on the publisher data
+            domBtnListUsers.style.disabled = !state.publisher.hasOwnProperty('members');
+            domBtnAddUsers.style.disabled = !state.publisher.hasOwnProperty('members');
+
+            
             domCard.style.display = 'block';
         }
 
@@ -705,7 +746,7 @@ var bulkUsers= (function() {
 
         function setBreadPublisher(crumbs) {
             // Add the publisher to the breadcrumbs
-            crumbs.unshift({'text': state.publisher.text, 'callback': function() {
+            crumbs.unshift({'text': state.publisher.title, 'callback': function() {
                 hideAllCards();
                 setBreadPublisher([]);
                 cardActions.show();
