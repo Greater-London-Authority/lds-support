@@ -239,6 +239,8 @@ var bulkUsers= (function() {
         var domCard = null;
         var domDescription = document.createElement("p");
         domDescription.appendChild(document.createTextNode("Please select the publisher you want to work with"));
+        var domFailure = document.createElement("p");
+        domFailure.appendChild(document.createTextNode("We're having issues getting data. Please ensure you are logged in before continuing."));
         var domPublishers = document.createElement("select");
         var domPublisherSelect = document.createElement("button");
         var successCallback = function() {}
@@ -246,15 +248,22 @@ var bulkUsers= (function() {
         function init() {
             // Attach ourselves as a child of domRoot
             domCard = document.createElement('div');
+            
+            // Attach myself to domRoot
+            domContainer.attach(domCard);
+
+            if (!jwt) {
+                domCard.appendChild(domFailure);
+                return;
+            }
+
             domCard.appendChild(domDescription);
             domCard.appendChild(domPublishers);
             domPublisherSelect.appendChild(document.createTextNode("Next"));
             domCard.appendChild(domPublisherSelect);
             domCard.style.display = 'none';
 
-            // Attach myself to domRoot
-            domContainer.attach(domCard);
-
+            
             // Wire up the selection button
             domPublisherSelect.addEventListener('click', function() {
                 // Once we've selected the publisher, go get the ID
@@ -625,8 +634,8 @@ var bulkUsers= (function() {
         }
         function show() {
             // Control the buttons on this page based on the publisher data
-            domBtnListUsers.style.disabled = !state.publisher.hasOwnProperty('members');
-            domBtnAddUsers.style.disabled = !state.publisher.hasOwnProperty('members');
+            domBtnListUsers.disabled = !state.publisher.readonly.auth.read;
+            domBtnAddUsers.disabled = !state.publisher.readonly.auth.edit;
 
             
             domCard.style.display = 'block';
