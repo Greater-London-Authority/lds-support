@@ -21,9 +21,16 @@ function listResources(dataset, dom) {
       outputs.forEach((result) => {
         let url = "/download/" + dataset + "/" + result['id'];
         let div = document.createElement("DIV");
+        div.style.marginBottom='10px';
+        let img = document.createElement("IMG");
+        img.setAttribute("src", "/api/static/" + result['format'] + ".png");
+        img.style.width="24px";
         let headerLink = document.createElement("A");
         headerLink.setAttribute("href", url);
+        headerLink.style.fontWeight='bold';
+        headerLink.style.marginLeft='15px';
         headerLink.appendChild(document.createTextNode(result['title']));
+        div.appendChild(img);
         div.appendChild(headerLink);
         dom.appendChild(div);
       });
